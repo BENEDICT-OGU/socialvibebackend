@@ -43,6 +43,7 @@
     "nodemailer": "^7.0.3",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
+    "paystack-api": "^2.0.6",
     "redis": "^4.7.1",
     "socket.io": "^4.8.1",
     "socket.io-redis": "^5.2.0",
