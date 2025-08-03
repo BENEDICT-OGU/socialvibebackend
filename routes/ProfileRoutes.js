@@ -11,7 +11,7 @@ const {
   usernameParamValidation,
   followUserValidation,
   searchUsersValidation
-} = require('../validators/profileValidation');
+} = require('../Validators/profileValidation');
 
 // Debug: Verify all required methods are available
 console.log('[Route Debug] Required methods:', {
