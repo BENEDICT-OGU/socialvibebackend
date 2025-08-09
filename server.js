@@ -3,6 +3,10 @@ const http = require('http');
 const socketIO = require('socket.io');
 const app = require('./app');
 const socketHandler = require("./socket/socket");
+const { createAdapter } = require('@socket.io/redis-adapter');
+const redisClient = require('./config/redis');
+const pubClient = redisClient.duplicate();
+const subClient = redisClient.duplicate();
 
 const server = http.createServer(app);
 
@@ -16,6 +20,13 @@ const io = socketIO(server, {
 });
 app.set('io', io);
 socketHandler(io);
+
+
+Promise.all([pubClient.connect(), subClient.connect()]).then(() => {
+  io.adapter(createAdapter(pubClient, subClient));
+  logger.info('Socket.IO Redis adapter initialized');
+});
+
 
 // Start server
 const PORT = process.env.PORT || 5000;

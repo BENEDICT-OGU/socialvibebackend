@@ -3,6 +3,7 @@ const router = express.Router();
 const { protect } = require("../middleware/auth");
 const { upload } = require("../middleware/upload");
 const PostController = require("../controllers/postController");
+const cacheMiddleware = require('../middleware/cacheMiddleware');
 const { 
   createPost: validateCreatePost, 
   postIdParam 
@@ -154,4 +155,7 @@ router.get("/public", async (req, res) => {
   }
 });
 
+router.get('/', cacheMiddleware(300), async (req, res) => {
+  // Your existing route logic
+});
 module.exports = router;
