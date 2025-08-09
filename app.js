@@ -1,4 +1,3 @@
-// app.js
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
@@ -7,9 +6,10 @@ const passport = require("passport");
 const path = require('path');
 const mongoose = require("mongoose");
 const ErrorResponse = require("./utils/ErrorResponse");
-const RedisStore = require('connect-redis').default;
-const redisClient = require('./config/redis');
-const { rateLimiter } = require('./middleware/rateLimiter');
+const redis = require('redis');
+const { createClient } = require('redis');
+const { RedisStore } = require('connect-redis');
+const rateLimiter = require('./middleware/rateLimiter');
 
 // Load env vars and Passport config
 dotenv.config();
@@ -17,7 +17,17 @@ require("./config/passport");
 
 const app = express();
 
-// CORS configuration
+// Create Redis client
+const redisClient = redis.createClient({
+  url: process.env.REDIS_URL,
+  socket: {
+    tls: true,
+    rejectUnauthorized: false
+  }
+});
+
+redisClient.connect().catch(console.error);
+
 // CORS configuration
 const allowedOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(",")
@@ -25,7 +35,6 @@ const allowedOrigins = process.env.CORS_ORIGINS
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -38,12 +47,20 @@ const corsOptions = {
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 
+// Middleware
 app.use(cors(corsOptions));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use('/api/', rateLimiter);
 
-app.use(rateLimiter(redisClient));
-
+// Session configuration with Redis store
+// Replace your current session setup with:
 app.use(session({
-  store: new RedisStore({ client: redisClient }),
+  store: new RedisStore({
+    client: redisClient,
+    prefix: 'sess:', // Optional key prefix
+    ttl: 86400 // Session TTL in seconds (24h)
+  }),
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
@@ -54,33 +71,35 @@ app.use(session({
   }
 }));
 
-
-// Middleware
-app.use(cors(corsOptions));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Session & Passport
-app.use(session({
-  secret: process.env.SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-  }
-}));
+// Passport initialization
 app.use(passport.initialize());
 app.use(passport.session());
 
+// Rate limiter
+
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/auth')) return next(); // Skip for auth routes
+  rateLimiter(req, res, next);
+});
 // MongoDB connection
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
+mongoose.connect(process.env.MONGO_URI)
 .then(() => console.log('📦 MongoDB connected'))
 .catch((err) => console.error('❌ MongoDB error:', err));
+
+
+app.get('/redis-health', async (req, res) => {
+  try {
+    const ping = await redisClient.ping();
+    const uptime = await redisClient.sendCommand(['INFO', 'uptime_in_seconds']);
+    res.json({
+      status: ping === 'PONG' ? 'healthy' : 'degraded',
+      uptime: uptime.split('\n')[0].split(':')[1].trim()
+    });
+  } catch (err) {
+    res.status(503).json({ status: 'unhealthy', error: err.message });
+  }
+});
+
 
 // Static files
 app.use("/uploads", express.static(path.join(__dirname, "public/uploads")));
@@ -90,7 +109,6 @@ app.use("/api/auth", require("./routes/auth"));
 app.use("/api/user", require("./routes/user"));
 app.use("/api/posts", require("./routes/posts"));
 app.use('/api/stories', require('./routes/storyRoutes'));
-// app.use('/api/reels', require('./routes/reelRoutes')); 
 app.use('/api/chat', require('./routes/chat'));
 app.use('/api/messages', require('./routes/messages'));
 app.use('/api/trending', require('./routes/trending'));
@@ -104,9 +122,6 @@ app.use("/api/threads", require("./routes/chatThreadRoutes"));
 app.use('/api/search', require("./routes/search"));
 app.use('/api/profile', require('./routes/ProfileRoutes'));
 app.use('/api/map', require('./routes/mapRoutes'));
-
-// Paystack payment routes
-// app.use('/api/payments', require('./routes/paymentRoute'));
 
 // Test route
 app.get("/", (req, res) => {

@@ -1,81 +1,36 @@
-// backend/config/redis.js
 const { createClient } = require('redis');
-const logger = require('./logger'); // Make sure you have a logger setup
 
-class RedisManager {
-  constructor() {
-    this.client = createClient({
-      url: process.env.REDIS_URL || 'rediss://default:AYjzAAIjcDEyOTE4MTNjZWRiN2I0MDc2YTdiYmI2M2I4YTExMDg2N3AxMA@right-grubworm-35059.upstash.io:6379',
-      socket: {
-        tls: true,
-        reconnectStrategy: (retries) => {
-          const delay = Math.min(retries * 100, 5000);
-          logger.warn(`Redis connection lost. Retry #${retries} in ${delay}ms`);
-          return delay;
-        },
-        connectTimeout: 10000
-      }
-    });
-
-    this.setupEventListeners();
-    this.connect();
-  }
-
-  setupEventListeners() {
-    this.client.on('connect', () => logger.info('Redis connecting...'));
-    this.client.on('ready', () => logger.info('Redis connected and ready'));
-    this.client.on('error', (err) => {
-      logger.error(`Redis error: ${err.message}`);
-      if (err.code === 'ECONNREFUSED') {
-        logger.error('Connection refused - check credentials/network');
-      }
-    });
-    this.client.on('reconnecting', () => logger.warn('Redis reconnecting...'));
-    this.client.on('end', () => logger.warn('Redis connection closed'));
-  }
-
-  async connect() {
-    try {
-      await this.client.connect();
-      
-      // Verify connection
-      const ping = await this.client.ping();
-      if (ping !== 'PONG') throw new Error('Invalid PING response');
-      
-      logger.info('Redis connection verified');
-    } catch (err) {
-      logger.error('Redis connection failed:', err);
-      process.exit(1); // Fail fast in production
+const redisClient = createClient({
+  url: process.env.REDIS_URL,
+  socket: {
+    tls: {
+      servername: 'right-grubworm-35059.upstash.io', // Critical for Upstash
+      rejectUnauthorized: false
+    },
+    connectTimeout: 20000, // Increase to 20 seconds
+    reconnectStrategy: (retries) => {
+      if (retries > 3) return new Error('Max retries reached');
+      return 1000; // Retry every 1 second
     }
   }
-
-  async disconnect() {
-    try {
-      await this.client.quit();
-      logger.info('Redis disconnected gracefully');
-    } catch (err) {
-      logger.error('Error disconnecting Redis:', err);
-    }
-  }
-
-  // Singleton pattern
-  static getInstance() {
-    if (!RedisManager.instance) {
-      RedisManager.instance = new RedisManager();
-    }
-    return RedisManager.instance;
-  }
-}
-
-// Handle graceful shutdown
-process.on('SIGTERM', async () => {
-  await RedisManager.getInstance().disconnect();
-  process.exit(0);
 });
 
-process.on('SIGINT', async () => {
-  await RedisManager.getInstance().disconnect();
-  process.exit(0);
+// Quieter error handling
+redisClient.on('error', (err) => {
+  if (!['ECONNRESET', 'CONNECTION_TIMEOUT'].includes(err.code)) {
+    console.error('Redis:', err.message);
+  }
 });
 
-module.exports = RedisManager.getInstance().client;
+redisClient.on('ready', () => console.log('Redis: Ready ✅'));
+
+// Connection wrapper
+(async () => {
+  try {
+    await redisClient.connect();
+  } catch (err) {
+    console.error('Initial Redis connection failed:', err.message);
+  }
+})();
+
+module.exports = redisClient;
