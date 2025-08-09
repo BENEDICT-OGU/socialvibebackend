@@ -3,44 +3,42 @@ const express = require("express");
 const cors = require("cors");
 const session = require("express-session");
 const passport = require("passport");
-const path = require('path');
 const mongoose = require("mongoose");
 const redis = require('redis');
-const RedisStore = require('connect-redis').default;
+const { createClient } = redis;
+const { default: RedisStore } = require('connect-redis'); // Correct import
 const rateLimiter = require('./middleware/rateLimiter');
-const ErrorResponse = require("./utils/ErrorResponse");
 
-// Initialize Express app
+// Initialize Express
 const app = express();
 
 // ======================
-// Redis Configuration
+// Redis Client Setup
 // ======================
-const redisClient = redis.createClient({
+const redisClient = createClient({
   url: process.env.REDIS_URL,
   socket: {
     tls: true,
     rejectUnauthorized: false,
-    connectTimeout: 10000,
-    reconnectStrategy: (retries) => Math.min(retries * 200, 5000)
+    connectTimeout: 10000
   }
 });
 
-// Handle Redis connection events
-redisClient.on('error', (err) => console.error('Redis Client Error:', err));
-redisClient.on('connect', () => console.log('🔴 Redis connecting...'));
+// Redis connection events
+redisClient.on('error', (err) => console.error('Redis Error:', err));
+redisClient.on('connect', () => console.log('Redis connecting...'));
 redisClient.on('ready', () => console.log('✅ Redis connected'));
-redisClient.on('reconnecting', () => console.log('🔄 Redis reconnecting'));
-redisClient.on('end', () => console.log('🚪 Redis disconnected'));
+redisClient.on('reconnecting', () => console.log('Redis reconnecting...'));
+redisClient.on('end', () => console.log('Redis disconnected'));
 
 // Connect to Redis
 (async () => {
   try {
     await redisClient.connect();
   } catch (err) {
-    console.error('❌ Failed to connect to Redis:', err.message);
+    console.error('❌ Redis connection failed:', err);
     if (process.env.NODE_ENV === 'production') {
-      console.warn('⚠️ Proceeding without Redis (some features degraded)');
+      console.warn('⚠️ Continuing without Redis (some features degraded)');
     } else {
       process.exit(1);
     }
@@ -60,7 +58,7 @@ const corsOptions = {
       callback(null, true);
     } else {
       console.log("❌ Blocked by CORS:", origin);
-      callback(new ErrorResponse("Not allowed by CORS", 403));
+      callback(new Error("Not allowed by CORS"));
     }
   },
   credentials: true,
@@ -71,30 +69,29 @@ const corsOptions = {
 // ======================
 // Middleware Setup
 // ======================
-app.set('trust proxy', 1); // Important for Render
+app.set('trust proxy', 1); // Required for Render
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Session Configuration
-app.use(session({
+const sessionConfig = {
   store: new RedisStore({ client: redisClient }),
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  proxy: true, // Required for secure cookies on Render
+  proxy: true, // Required for Render
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: 24 * 60 * 60 * 1000, // 1 day
-    httpOnly: true,
-    domain: process.env.NODE_ENV === 'production' 
-      ? new URL(process.env.FRONTEND_URL).hostname 
-      : undefined
+    maxAge: 24 * 60 * 60 * 1000,
+    httpOnly: true
   }
-}));
+};
 
-// Rate Limiter (after session middleware)
+app.use(session(sessionConfig));
+
+// Rate Limiter
 app.use('/api/', rateLimiter);
 
 // ======================
@@ -103,19 +100,19 @@ app.use('/api/', rateLimiter);
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('📦 MongoDB connected'))
   .catch((err) => {
-    console.error('❌ MongoDB connection error:', err);
+    console.error('❌ MongoDB error:', err);
     process.exit(1);
   });
 
 // ======================
-// Passport Configuration
+// Passport Setup
 // ======================
 require("./config/passport");
 app.use(passport.initialize());
 app.use(passport.session());
 
 // ======================
-// API Routes
+// API Routes (Keep your existing routes)
 // ======================
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/user", require("./routes/user"));
@@ -142,8 +139,7 @@ app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(err.statusCode || 500).json({ 
     success: false, 
-    message: err.message || 'Internal Server Error',
-    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    message: err.message || 'Internal Server Error' 
   });
 });
 
