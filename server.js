@@ -1,44 +1,44 @@
-const http = require('http');
-const socketIO = require('socket.io');
+require('dotenv').config();
+const { createServer } = require('http');
+const { Server } = require('socket.io');
 const app = require('./app');
-const socketHandler = require("./socket/socket");
-
-const server = http.createServer(app);
-
-// Socket.IO with Redis adapter
-const { createAdapter } = require('@socket.io/redis-adapter');
 const redisClient = require('./config/redis');
 
-const io = socketIO(server, {
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL,
+    origin: process.env.FRONTEND_URL.split(','),
     credentials: true
   }
 });
 
-// Initialize adapter after connections
-const initSocketAdapter = async () => {
+// Initialize Socket.IO Redis adapter (with fallback)
+const initializeRedisAdapter = async () => {
   try {
+    const { createAdapter } = require('@socket.io/redis-adapter');
     const pubClient = redisClient.duplicate();
     const subClient = redisClient.duplicate();
+
     await Promise.all([pubClient.connect(), subClient.connect()]);
     io.adapter(createAdapter(pubClient, subClient));
-    console.log('PubSub: Active');
+    console.log('✅ Socket.IO Redis adapter initialized');
   } catch (err) {
-    console.log('PubSub: Using fallback (Redis not available)');
+    console.warn('❌ Redis adapter disabled - using memory fallback:', err.message);
   }
 };
 
 // Start server
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, async () => {
+httpServer.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌐 Frontend: ${process.env.FRONTEND_URL}`);
-  await initSocketAdapter();
+  await initializeRedisAdapter();
 });
 
-// Cleanup on exit
+// Graceful shutdown
 process.on('SIGTERM', () => {
-  io.close();
-  server.close();
+  console.log('🔴 Shutting down gracefully...');
+  httpServer.close(async () => {
+    await redisClient.quit().catch(() => {});
+    process.exit(0);
+  });
 });
