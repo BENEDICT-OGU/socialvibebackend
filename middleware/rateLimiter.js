@@ -30,7 +30,7 @@ module.exports = async (req, res, next) => {
         await memoryLimiter.consume(key);
       } else {
         // Redis working but rate limit exceeded
-        throw redisErr;
+        throw redisErr; // This will be caught by outer catch
       }
     }
 
@@ -44,10 +44,24 @@ module.exports = async (req, res, next) => {
     
     next();
   } catch (err) {
-    res.set('Retry-After', String(err.msBeforeNext / 1000));
+    console.error('Rate limit error:', err); // Add logging for debugging
+    
+    // Calculate retry seconds safely
+    let retrySeconds = 60; // Default to 60 seconds
+    
+    if (err.msBeforeNext !== undefined) {
+      retrySeconds = Math.ceil(err.msBeforeNext / 1000);
+    }
+    
+    // Ensure retrySeconds is a valid number
+    if (isNaN(retrySeconds) || retrySeconds < 0) {
+      retrySeconds = 60; // Fallback to 60 seconds if invalid
+    }
+    
+    res.set('Retry-After', String(retrySeconds));
     res.status(429).json({
       success: false,
-      message: `Too many requests. Try again in ${Math.ceil(err.msBeforeNext / 1000)} seconds`
+      message: `Too many requests. Try again in ${retrySeconds} seconds`
     });
   }
 };
