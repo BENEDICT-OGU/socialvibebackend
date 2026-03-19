@@ -7,7 +7,7 @@ const mongoose = require("mongoose");
 const redis = require('redis');
 const { createClient } = redis;
 const { default: RedisStore } = require('connect-redis'); // Correct import
-// const rateLimiter = require('./middleware/rateLimiter');
+const rateLimiter = require('./middleware/rateLimiter');
 
 // Initialize Express
 const app = express();
